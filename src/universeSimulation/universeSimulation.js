@@ -15,7 +15,7 @@
  * 作者: Erhai-lake
  * 版本: 1.1.2
  * 日期: 2026-06-07
- * GitHub: https://github.com/Erhai-lake
+ * GitHub: https://github.com/Erhai-lake/js-lib
  *
  * =================================================================
  * 使用手册 (Usage Guide)

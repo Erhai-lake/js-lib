@@ -1,0 +1,42 @@
+{
+	"name": "js-lib",
+	"version": "1.0.0",
+	"description": "一些自用的js库",
+	"type": "module",
+	"exports": {
+		"./indexDB": {
+			"import": "./dist/indexDB/indexDB.esm.js",
+			"require": "./dist/indexDB/indexDB.cjs",
+			"types": "./dist/indexDB/indexDB.d.ts"
+		},
+		"./storageDB": {
+			"import": "./dist/storageDB/storageDB.esm.js",
+			"require": "./dist/storageDB/storageDB.cjs",
+			"types": "./dist/storageDB/storageDB.d.ts"
+		},
+		"./universeSimulation": {
+			"import": "./dist/universeSimulation/universeSimulation.esm.js",
+			"require": "./dist/universeSimulation/universeSimulation.cjs",
+			"types": "./dist/universeSimulation/universeSimulation.d.ts"
+		}
+	},
+	"scripts": {
+		"build": "rollup -c && tsc -p tsconfig.types.json",
+		"build:watch": "rollup -c -w",
+		"clean": "if exist dist rmdir /s /q dist",
+		"prebuild": "npm run clean"
+	},
+	"keywords": [
+		"indexeddb",
+		"storage",
+		"simulation",
+		"canvas"
+	],
+	"author": "Erhai-lake",
+	"license": "MIT",
+	"devDependencies": {
+		"@rollup/plugin-terser": "^0.4.4",
+		"rollup": "^4.18.0",
+		"typescript": "^6.0.3"
+	}
+}

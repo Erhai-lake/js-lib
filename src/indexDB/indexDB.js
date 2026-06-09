@@ -2,28 +2,28 @@
  * =================================================================
  * 信息 (Information)
  * =================================================================
- * TinyDexie: 基于 IndexedDB 的声明式/多物理表轻量级存储库.
+ * IndexDB: 基于 IndexedDB 的声明式/多物理表轻量级存储库.
  * 完美融合了 Dexie 的丝滑 API 与轻量级单文件设计的优势.
  *
  * 特性:
  * 1. 属性代理: 引入 Proxy 机制, 允许像访问对象属性一样直接操作表 (db.tableName.put).
  * 2. 真实物理隔离: 支持在初始化时自定义真正的物理表与索引, 释放 IndexedDB 原生查询性能.
- * 3. 灵活主键: 支持任意自定义主键字段, 并原生支持 `$$` 前缀的自动增量主键（Auto-Increment）.
+ * 3. 灵活主键: 支持任意自定义主键字段, 并原生支持 `$$` 前缀的自动增量主键 (Auto-Increment).
  * 4. 批量事务: 内置高效的原子级批量写入 `bulkPut` 与全量获取 `toArray`.
- * 5. 健壮容错: 内部自动捕获异常并输出日志, 提供安全的默认返回值（吞掉崩溃, 保障 UI）.
+ * 5. 健壮容错: 内部自动捕获异常并输出日志, 提供安全的默认返回值 (吞掉崩溃, 保障 UI).
  *
  * 作者: Erhai-lake
  * 版本: 3.0.0
  * 日期: 2026-06-02
- * GitHub: https://github.com/Erhai-lake
+ * GitHub: https://github.com/Erhai-lake/js-lib
  *
  * =================================================================
  * 使用手册 (Usage Guide)
  * =================================================================
- * import {TinyDexie} from "./tinyDexie.js"
+ * import {IndexDB} from "./indexDB.js"
  *
  * 初始化数据库与物理表 (语法: "主键, 索引1, 索引2...", 主键前加 $$ 代表自增):
- * const db = new TinyDexie("SnakeGameDB", {
+ * const db = new IndexDB("SnakeGameDB", {
  * replays: "id, mode",        // 自定义物理表 1: replays, 主键为 id
  * userSettings: "settingKey", // 自定义物理表 2: userSettings, 主键为 settingKey
  * scores: "$$id, score"       // 自定义物理表 3: scores, 主键为 id 且自增
@@ -48,11 +48,11 @@ const cachedDBs = new Map()
 // 正在打开的数据库 Promise 挂起池, 防止并发重复创建连接
 const openPromises = new Map()
 
-export class TinyDexie {
+export class IndexDB {
 	/**
 	 * 初始化数据库实例
 	 * @param {string} dbName 数据库名称
-	 * @param {Object} schemas 表结构配置。例如: {replays: "id", scores: "$$id, score"}
+	 * @param {Object} schemas 表结构配置. 例如: {replays: "id", scores: "$$id, score"}
 	 * @param {number} [version=1] 数据库版本号
 	 */
 	constructor(dbName, schemas = {}, version = 1) {
