@@ -56,4 +56,5 @@ jobs:
                 run: |
                     VERSION=$(git describe --tags --always)
                     echo "Creating release for version: $VERSION"
-                    gh release create "$VERSION" --notes "Automated build from CI" ./dist/*
+                    gh release create "$VERSION" --notes "Automated build from CI"
+                    gh release upload "$VERSION" ./dist/**/* --clobber
