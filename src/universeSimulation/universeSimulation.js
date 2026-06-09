@@ -11,10 +11,13 @@
  * 4. 多普勒高能激波: 鼠标点击触发高能扩散环, 粒子碰撞前瞬间完美继承多普勒极光色.
  * 5. 动态配置注入: 支持通过第二个参数传入定制化对象, 动态覆盖默认物理常数指标.
  * 6. 内存安全管理: 内置自动化防溢出机制与精密事件销毁钩子 (destroy), 杜绝内存泄漏.
+ * 7. 长按超新星坍缩[v1.3.0]: 鼠标长按可激活宇宙引力奇点, 全场粒子做向心漩涡塌陷, 释放时触发大爆炸.
+ * 8. 光速星尘流星雨[v1.2.0]: 周期性生成横穿夜空的彗尾流星, 受到激波拦截时碎裂为次级高能火花.
+ * 9. 激波极光连锁网[v1.2.0]: 粒子捕获激波瞬间向邻近低能级星体拉出极光能量传导闪电链.
  *
  * 作者: Erhai-lake
- * 版本: 1.1.2
- * 日期: 2026-06-07
+ * 版本: 1.3.0
+ * 日期: 2026-06-09
  * GitHub: https://github.com/Erhai-lake/js-lib
  *
  * =================================================================
@@ -56,7 +59,14 @@ export const initUniverseSimulation = (containerElement, configOptions = {
 	explodeForce: 18,
 	maxShockwave: 10,
 	orbitEasing: 0.08,
-	waveSpeed: 10
+	waveSpeed: 10,
+	meteorFrequency: 0.008,
+	meteorMaxCount: 15,
+	lightningChainLen: 3,
+	lightningMaxDist: 80,
+	supernovaDuration: 120,
+	chargeMaxFrames: 90,
+	supernovaPullForce: 2.5
 }) => {
 	if (!containerElement) {
 		console.error("未能找到有效的绑定容器元素")
@@ -89,6 +99,20 @@ export const initUniverseSimulation = (containerElement, configOptions = {
 	const ORBIT_EASING = configOptions.orbitEasing ?? 0.08
 	// 激波扩散速度 (默认: 10)
 	const WAVE_SPEED = configOptions.waveSpeed ?? 10
+	// 每帧生成流星的概率基础 (默认: 0.008)
+	const METEOR_FREQUENCY = configOptions.meteorFrequency ?? 0.008
+	// 视口内允许同时存在的最大流星数 (默认: 15)
+	const METEOR_MAX_COUNT = configOptions.meteorMaxCount ?? 15
+	// 激波极光链单次连锁的最大星体数 (默认: 3)
+	const LIGHTNING_CHAIN_LEN = configOptions.lightningChainLen ?? 3
+	// 极光闪电链允许传导的最大物理距离 (默认: 80)
+	const LIGHTNING_MAX_DIST = configOptions.lightningMaxDist ?? 80
+	// 超新星坍缩全周期的动画帧数 (默认: 120)
+	const SUPERNOVA_DURATION = configOptions.supernovaDuration ?? 120
+	// 长按超新星坍缩的动画帧数 (默认: 90)
+	const CHARGE_MAX_FRAMES = configOptions.chargeMaxFrames ?? 90
+	// 长按超新星坍缩的引力常数系数 (默认: 2.5)
+	const SUPERNOVA_PULL_FORCE = configOptions.supernovaPullForce ?? 2.5
 
 	let width = CANVAS.width = containerElement.clientWidth
 	let height = CANVAS.height = containerElement.clientHeight
@@ -97,8 +121,24 @@ export const initUniverseSimulation = (containerElement, configOptions = {
 	let orbitCenterX = width / 2
 	let orbitCenterY = height / 2
 	let waveIdCounter = 0
+	let isMouseDown = false
+	let chargeTimeoutId = null
+
 	let shockwaveArray = []
+	let meteorArray = []
+	let lightningChainArray = []
 	const STARS_ARRAY = []
+
+	// 超新星奇点状态机
+	let supernovaState = {
+		active: false,
+		timer: 0,
+		chargeProgress: 0,
+		x: 0,
+		y: 0,
+		// none | implode | explode
+		phase: "none"
+	}
 
 	/**
 	 * 创建激波数据对象
@@ -176,10 +216,294 @@ export const initUniverseSimulation = (containerElement, configOptions = {
 	}
 
 	/**
+	 * 生成高能极光链闪电网
+	 */
+	const generateLightningChain = (startStar, waveColor) => {
+		if (lightningChainArray.length > MAX_SHOCKWAVE * 3) {
+			return
+		}
+		let currentSource = startStar
+		let localChain = [currentSource]
+		let visitedIds = new Set([currentSource.id])
+
+		for (let step = 0; step < LIGHTNING_CHAIN_LEN; step++) {
+			let closestTarget = null
+			let minDist = LIGHTNING_MAX_DIST
+
+			for (let i = 0; i < STARS_ARRAY.length; i++) {
+				let potentialTarget = STARS_ARRAY[i]
+				if (potentialTarget.id === currentSource.id || visitedIds.has(potentialTarget.id)) {
+					continue
+				}
+
+				if (potentialTarget.isExploding && step > 0) {
+					continue
+				}
+
+				let dx = potentialTarget.x - currentSource.x
+				let dy = potentialTarget.y - currentSource.y
+				// 使用平方和先做初筛, 避免高频执行消耗性能
+				let distSq = dx * dx + dy * dy
+
+				if (distSq < minDist * minDist) {
+					let dist = Math.sqrt(distSq)
+					if (dist < minDist) {
+						minDist = dist
+						closestTarget = potentialTarget
+					}
+				}
+			}
+
+			// 一旦发现最近的星体都超过了传导距离, 立刻斩断链条, 杜绝远距离拉丝
+			if (closestTarget && minDist < LIGHTNING_MAX_DIST) {
+				localChain.push(closestTarget)
+				visitedIds.add(closestTarget.id)
+				currentSource = closestTarget
+			} else {
+				break
+			}
+		}
+
+		if (localChain.length > 1) {
+			lightningChainArray.push({
+				nodes: localChain,
+				colorAngle: waveColor,
+				life: 8,
+				maxLife: 8
+			})
+		}
+	}
+
+	/**
+	 * 渲染并管理极光闪电网
+	 */
+	const handleLightningChains = () => {
+		lightningChainArray = lightningChainArray.filter(chain => chain.life > 0)
+		lightningChainArray.forEach(chain => {
+			let alpha = chain.life / chain.maxLife
+			CTX.save()
+			CTX.strokeStyle = `hsla(${chain.colorAngle}, 100%, 75%, ${alpha * 0.7})`
+			CTX.lineWidth = 1.5 * alpha
+			CTX.shadowBlur = 8
+			CTX.shadowColor = `hsla(${chain.colorAngle}, 100%, 60%, ${alpha})`
+
+			CTX.beginPath()
+			CTX.moveTo(chain.nodes[0].x, chain.nodes[0].y)
+
+			for (let i = 1; i < chain.nodes.length; i++) {
+				let fromNode = chain.nodes[i - 1]
+				let toNode = chain.nodes[i]
+				let midX = (fromNode.x + toNode.x) / 2
+				let midY = (fromNode.y + toNode.y) / 2
+
+				// 注入混沌空间扰动偏移, 营造拟真折线极光雷电感
+				let offsetX = (Math.random() - 0.5) * 12
+				let offsetY = (Math.random() - 0.5) * 12
+
+				CTX.lineTo(midX + offsetX, midY + offsetY)
+				CTX.lineTo(toNode.x, toNode.y)
+			}
+			CTX.stroke()
+			CTX.restore()
+			chain.life--
+		})
+	}
+
+	/**
+	 * 创建彗尾流星
+	 */
+	const createMeteor = () => {
+		let fromLeft = Math.random() > 0.5
+		let startX = fromLeft ? -20 : width + 20
+		let startY = Math.random() * (height * 0.6)
+		let angle = fromLeft ? Math.random() * 0.5 : Math.PI - Math.random() * 0.5
+		let mSpeed = 12 + Math.random() * 8
+
+		return {
+			x: startX,
+			y: startY,
+			vx: Math.cos(angle) * mSpeed,
+			vy: Math.sin(angle) * mSpeed,
+			size: 2.5 + Math.random() * 2,
+			colorAngle: 180 + Math.random() * 40,
+			active: true,
+			history: []
+		}
+	}
+
+	/**
+	 * 流星雨物理驱动与激波拦截判定系统
+	 */
+	const handleMeteors = () => {
+		if (Math.random() < METEOR_FREQUENCY && meteorArray.length < METEOR_MAX_COUNT) {
+			meteorArray.push(createMeteor())
+		}
+
+		meteorArray = meteorArray.filter(m => m.active)
+		meteorArray.forEach(m => {
+			m.history.push({x: m.x, y: m.y})
+			if (m.history.length > 8) {
+				m.history.shift()
+			}
+
+			m.x += m.vx
+			m.y += m.vy
+
+			// 边界判定
+			if (m.x < -100 || m.x > width + 100 || m.y > height + 100) {
+				m.active = false
+				return
+			}
+
+			// 拦截判定: 检查是否碰到了扩散中的激波面
+			for (let i = 0; i < shockwaveArray.length; i++) {
+				let wave = shockwaveArray[i]
+				let dx = m.x - wave.x
+				let dy = m.y - wave.y
+				let dist = Math.sqrt(dx * dx + dy * dy)
+
+				if (dist >= wave.lastRadius - 8 && dist <= wave.radius + 8) {
+					m.active = false
+					// 彗核物理碎裂效应: 在撞击点就地爆发释放多颗高能次级粒子
+					for (let k = 0; k < 12; k++) {
+						let scatterStar = createStar()
+						scatterStar.x = m.x
+						scatterStar.y = m.y
+						let sAngle = Math.random() * Math.PI * 2
+						let sSpeed = (Math.random() * 0.5 + 0.5) * EXPLODE_FORCE * 1.2
+						scatterStar.vx = Math.cos(sAngle) * sSpeed
+						scatterStar.vy = Math.sin(sAngle) * sSpeed
+						scatterStar.isExploding = true
+						scatterStar.explodeTimer = 50
+						scatterStar.colorAngle = wave.waveColor
+						STARS_ARRAY.push(scatterStar)
+					}
+					break
+				}
+			}
+
+			// 绘制流星高能彗尾
+			if (m.history.length > 1) {
+				CTX.save()
+				for (let i = 1; i < m.history.length; i++) {
+					let p1 = m.history[i - 1]
+					let p2 = m.history[i]
+					let alpha = i / m.history.length
+					CTX.strokeStyle = `hsla(${m.colorAngle}, 100%, 75%, ${alpha * 0.4})`
+					CTX.lineWidth = m.size * alpha
+					CTX.beginPath()
+					CTX.moveTo(p1.x, p1.y)
+					CTX.lineTo(p2.x, p2.y)
+					CTX.stroke()
+				}
+
+				// 彗核核心高亮
+				CTX.beginPath()
+				CTX.arc(m.x, m.y, m.size, 0, Math.PI * 2)
+				CTX.fillStyle = "#fff"
+				CTX.fill()
+				CTX.restore()
+			}
+		})
+	}
+
+	/**
+	 * 执行超新星量子大爆炸
+	 */
+	const triggerSupernovaExplosion = () => {
+		supernovaState.phase = "explode"
+		supernovaState.timer = SUPERNOVA_DURATION
+
+		STARS_ARRAY.forEach(star => {
+			star.isInOrbit = false
+			let dx = star.x - supernovaState.x
+			let dy = star.y - supernovaState.y
+			let angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.4
+
+			// 爆炸威力挂钩长按蓄力程度, 蓄满力威力最大
+			let intensity = supernovaState.chargeProgress / CHARGE_MAX_FRAMES
+			let boomForce = (2 + Math.random() * 3) * EXPLODE_FORCE * (0.5 + intensity * 0.5)
+
+			star.vx = Math.cos(angle) * boomForce
+			star.vy = Math.sin(angle) * boomForce
+			star.isExploding = true
+			star.explodeTimer = 60
+			star.colorAngle = Math.random() * 360
+			star.radius = star.baseRadius * 4
+		})
+	}
+
+	/**
+	 * 实时驱动长按蓄力及爆炸波形调度
+	 */
+	const handleSupernovaCore = () => {
+		if (!supernovaState.active) {
+			return
+		}
+
+		// 阶段一: 鼠标按下长按蓄力中
+		if (supernovaState.phase === "charge") {
+			if (isMouseDown) {
+				if (supernovaState.chargeProgress < CHARGE_MAX_FRAMES) {
+					supernovaState.chargeProgress++
+				} else {
+					// 蓄力强行充满, 直接原地被动引爆
+					triggerSupernovaExplosion()
+					return
+				}
+			}
+
+			// 跟随当前的轨道微调质心坐标
+			supernovaState.x = orbitCenterX
+			supernovaState.y = orbitCenterY
+
+			let progress = supernovaState.chargeProgress / CHARGE_MAX_FRAMES
+
+			// 渲染时空裂缝坍缩漩涡
+			CTX.save()
+			let chargeGlow = CTX.createRadialGradient(
+				supernovaState.x, supernovaState.y, 2,
+				supernovaState.x, supernovaState.y, progress * 150
+			)
+			chargeGlow.addColorStop(0, `rgba(255, 255, 255, ${progress * 0.9})`)
+			chargeGlow.addColorStop(0.2, `hsla(280, 100%, 70%, ${progress * 0.6})`)
+			chargeGlow.addColorStop(0.5, `hsla(190, 100%, 50%, ${progress * 0.3})`)
+			chargeGlow.addColorStop(1, "rgba(0, 0, 0, 0)")
+
+			CTX.fillStyle = chargeGlow
+			CTX.beginPath()
+			CTX.arc(supernovaState.x, supernovaState.y, progress * 150, 0, Math.PI * 2)
+			CTX.fill()
+			CTX.restore()
+		}
+		// 阶段二: 爆发响应状态
+		else if (supernovaState.phase === "explode") {
+			supernovaState.timer--
+			if (supernovaState.timer <= 0) {
+				supernovaState.active = false
+				supernovaState.phase = "none"
+				supernovaState.chargeProgress = 0
+				return
+			}
+
+			let outProgress = (SUPERNOVA_DURATION - supernovaState.timer) / SUPERNOVA_DURATION
+			CTX.save()
+			CTX.strokeStyle = `hsla(${Math.random() * 360}, 100%, 80%, ${1 - outProgress})`
+			CTX.lineWidth = 15 * (1 - outProgress)
+			CTX.beginPath()
+			CTX.arc(supernovaState.x, supernovaState.y, outProgress * Math.max(width, height) * 1.2, 0, Math.PI * 2)
+			CTX.stroke()
+			CTX.restore()
+		}
+	}
+
+	/**
 	 * 重置单颗星星指标
 	 * @param {Object} star - 包含星星数据的对象
 	 */
 	const resetStar = (star) => {
+		star.id = star.id ?? Math.random()
+
 		star.x = Math.random() * width
 		star.y = Math.random() * height
 		star.vx = (Math.random() - 0.5) * 0.5
@@ -255,6 +579,7 @@ export const initUniverseSimulation = (containerElement, configOptions = {
 	 * @param {Object} star - 包含星星数据的对象
 	 */
 	const updateStar = (star) => {
+		// 常规呼吸闪烁
 		if (!star.isExploding) {
 			star.alpha += star.blinkSpeed
 			if (star.alpha > 1 || star.alpha < 0.2) {
@@ -262,30 +587,67 @@ export const initUniverseSimulation = (containerElement, configOptions = {
 			}
 		}
 
-		// 遇到了一个崭新的激波, 能触发二次轰击与轨迹修正
+		// 全场粒子进入无限螺旋聚拢坍缩态
+		if (supernovaState.active && supernovaState.phase === "charge") {
+			let sDx = supernovaState.x - star.x
+			let sDy = supernovaState.y - star.y
+			let sDist = Math.sqrt(sDx * sDx + sDy * sDy)
+
+			if (sDist > 8) {
+				let chargeRatio = supernovaState.chargeProgress / CHARGE_MAX_FRAMES
+				let dynamicPull = SUPERNOVA_PULL_FORCE * (1 + chargeRatio * 2)
+
+				// 基础向心吸力速度
+				star.vx += (sDx / sDist) * dynamicPull
+				star.vy += (sDy / sDist) * dynamicPull
+
+				// 混入螺旋环绕切线切角, 产生星系星云剥离抽吸的黑洞漩涡感
+				star.vx += (-sDy / sDist) * (dynamicPull * 0.6)
+				star.vy += (sDx / sDist) * (dynamicPull * 0.6)
+
+				star.vx *= 0.82
+				star.vy *= 0.82
+			} else {
+				// 被完全剥离抽向黑洞奇点的粒子高频闪烁并处于重质态
+				star.x = supernovaState.x + (Math.random() - 0.5) * 10
+				star.y = supernovaState.y + (Math.random() - 0.5) * 10
+				star.alpha = 1
+				return
+			}
+			star.x += star.vx
+			star.y += star.vy
+			return
+		}
+
+		// 区间无缝激波拦截循环
 		for (let i = 0; i < shockwaveArray.length; i++) {
 			let wave = shockwaveArray[i]
 			if (!star.hitWaves[wave.id]) {
 				let dx = star.x - wave.x
 				let dy = star.y - wave.y
 				let dist = Math.sqrt(dx * dx + dy * dy)
+
 				const MIN_BOUND = wave.lastRadius - 5
 				const MAX_BOUND = wave.radius + 5
+
 				if (dist >= MIN_BOUND && dist <= MAX_BOUND) {
 					star.hitWaves[wave.id] = true
-					// 触发连击冲击响应
 					explodeStar(star, wave)
+					generateLightningChain(star, wave.waveColor)
 					break
 				}
 			}
 		}
 
+		// 常规物理状态机切换树
 		if (star.isExploding) {
 			star.vx *= 0.96
 			star.vy *= 0.96
 			star.explodeTimer--
 
-			if (star.radius > star.baseRadius) star.radius -= 0.15
+			if (star.radius > star.baseRadius) {
+				star.radius -= 0.15
+			}
 
 			if (star.explodeTimer <= 0) {
 				star.isExploding = false
@@ -341,16 +703,27 @@ export const initUniverseSimulation = (containerElement, configOptions = {
 			}
 		}
 
-		// 如果超出边界过远, 直接就地重置粒子到屏幕内的随机位置, 实现无缝死而复生
+		// 视口安全溢出重置
 		const BUFFER = 50
 		if (star.x < -BUFFER || star.x > width + BUFFER || star.y < -BUFFER || star.y > height + BUFFER) {
 			resetStar(star)
 		} else {
-			// 正常的视口穿梭包裹逻辑
-			if (star.x < 0) star.x = width
-			if (star.x > width) star.x = 0
-			if (star.y < 0) star.y = height
-			if (star.y > height) star.y = 0
+			if (star.x < 0) {
+				star.x = width
+				if (star.vx < 0) star.vx *= -0.5
+			}
+			if (star.x > width) {
+				star.x = 0
+				if (star.vx > 0) star.vx *= -0.5
+			}
+			if (star.y < 0) {
+				star.y = height
+				if (star.vy < 0) star.vy *= -0.5
+			}
+			if (star.y > height) {
+				star.y = 0
+				if (star.vy > 0) star.vy *= -0.5
+			}
 		}
 	}
 
@@ -365,24 +738,6 @@ export const initUniverseSimulation = (containerElement, configOptions = {
 		CTX.fillStyle = `hsla(${star.colorAngle}, 95%, 80%, ${star.alpha})`
 		CTX.fill()
 		CTX.restore()
-	}
-
-	/**
-	 * 引力超载拦截
-	 * @param {Object} star - 包含星星数据的对象
-	 */
-	const implodeStar = (star) => {
-		if (star.isInOrbit) {
-			star.orbitPlaneAngle = Math.random() * Math.PI
-			star.orbitSpeed = (Math.random() > 0.5 ? 1 : -1) * (0.1 + Math.random() * 0.15)
-		} else {
-			let dx = mouseX - star.x
-			let dy = mouseY - star.y
-			let distance = Math.sqrt(dx * dx + dy * dy)
-			if (distance < 80) {
-				resetStar(star)
-			}
-		}
 	}
 
 	/**
@@ -428,6 +783,12 @@ export const initUniverseSimulation = (containerElement, configOptions = {
 		drawBackground()
 		handleShockwave()
 
+		// 调度三大宏观星演特效
+		handleLightningChains()
+		handleMeteors()
+		handleSupernovaCore()
+
+		// 自适应粒子池防干涸补给
 		while (STARS_ARRAY.length < PARTICLE_COUNT) {
 			STARS_ARRAY.push(createStar())
 		}
@@ -457,13 +818,45 @@ export const initUniverseSimulation = (containerElement, configOptions = {
 		const RECT = containerElement.getBoundingClientRect()
 		mouseX = e.clientX - RECT.left
 		mouseY = e.clientY - RECT.top
+		isMouseDown = true
 
-		if (shockwaveArray.length < MAX_SHOCKWAVE) {
-			shockwaveArray.push(createShockwave(mouseX, mouseY))
-		} else {
-			STARS_ARRAY.forEach(star => {
-				implodeStar(star)
-			})
+		if (chargeTimeoutId) {
+			clearTimeout(chargeTimeoutId)
+		}
+
+		// 只有当前没有激活超新星时, 才开启 1 秒长按判定机制
+		if (!supernovaState.active) {
+			chargeTimeoutId = setTimeout(() => {
+				// 1秒后仍未松开, 正式确认为长按蓄力阶段
+				supernovaState.active = true
+				supernovaState.phase = "charge"
+				supernovaState.chargeProgress = 0
+				supernovaState.x = orbitCenterX
+				supernovaState.y = orbitCenterY
+				chargeTimeoutId = null
+			}, 1000)
+		}
+	}
+
+	const handleMouseUp = () => {
+		isMouseDown = false
+		// 如果 chargeTimeoutId 存在, 说明按下时间不足 1 秒
+		if (chargeTimeoutId) {
+			clearTimeout(chargeTimeoutId)
+			chargeTimeoutId = null
+			// 单击直接释放一个常规高能扩散激波
+			if (shockwaveArray.length < MAX_SHOCKWAVE) {
+				shockwaveArray.push(createShockwave(orbitCenterX, orbitCenterY))
+			}
+			return
+		}
+		// 如果已经进入了超新星长按蓄力阶段, 松开则触发大爆炸
+		if (supernovaState.active && supernovaState.phase === "charge") {
+			triggerSupernovaExplosion()
+			// 并在爆炸中心追加一个冲击波
+			if (shockwaveArray.length < MAX_SHOCKWAVE) {
+				shockwaveArray.push(createShockwave(supernovaState.x, supernovaState.y))
+			}
 		}
 	}
 
@@ -478,6 +871,7 @@ export const initUniverseSimulation = (containerElement, configOptions = {
 	// 绑定事件到容器元素上
 	containerElement.addEventListener("mousemove", handleMouseMove)
 	containerElement.addEventListener("mousedown", handleMouseDown)
+	containerElement.addEventListener("mouseup", handleMouseUp)
 	window.addEventListener("resize", handleResize)
 
 	// 启动动画引擎
@@ -489,8 +883,12 @@ export const initUniverseSimulation = (containerElement, configOptions = {
 			if (animationFrameId) {
 				cancelAnimationFrame(animationFrameId)
 			}
+			if (chargeTimeoutId) {
+				clearTimeout(chargeTimeoutId)
+			}
 			containerElement.removeEventListener("mousemove", handleMouseMove)
 			containerElement.removeEventListener("mousedown", handleMouseDown)
+			window.removeEventListener("mouseup", handleMouseUp)
 			window.removeEventListener("resize", handleResize)
 			if (CANVAS.parentNode) {
 				CANVAS.parentNode.removeChild(CANVAS)
