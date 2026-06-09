@@ -57,4 +57,5 @@ jobs:
                     VERSION=$(git describe --tags --always)
                     echo "Creating release for version: $VERSION"
                     gh release create "$VERSION" --notes "Automated build from CI"
-                    gh release upload "$VERSION" ./dist/**/* --clobber
+                    cd dist && for dir in */; do zip -r "${dir%/}.zip" "$dir"; done && cd ..
+                    gh release upload "$VERSION" ./dist/*.zip --clobber
